@@ -1,0 +1,36 @@
+import subprocess, os, sys
+FF = r"C:\Users\1234d\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-9.0.2-full_build\bin\ffmpeg.EXE"
+D = r"C:\Users\1234d\Documents\AmbientChannel\08_rainy_cafe"
+os.chdir(D)
+os.makedirs("units", exist_ok=True)
+log = open("units_log.txt", "w")
+CL = 7.90   # usable clip length
+XF = 1.2    # loop crossfade
+ENC = ["-c:v", "libx265", "-b:v", "7M", "-maxrate", "9M", "-bufsize", "14M", "-preset", "medium",
+       "-tag:v", "hvc1", "-pix_fmt", "yuv420p", "-r", "24",
+       "-x265-params", "log-level=error:keyint=48:min-keyint=48:scenecut=0"]
+UP = "scale=2560:1440:flags=lanczos,unsharp=5:5:0.6,format=yuv420p"
+scenes = ["v1_wide", "v2_window", "v3_counter", "v4_corner", "v5_night"]
+
+def run(cmd):
+    r = subprocess.run(cmd, capture_output=True, text=True, creationflags=0x08000000)
+    log.write(" ".join(cmd[-1:]) + " rc=%d %s\n" % (r.returncode, r.stderr[-300:])); log.flush()
+
+# 1) seamless loop unit per scene (length CL-XF)
+for s in scenes:
+    fc = ("[0:v]fps=24,trim=0:%.2f,setpts=PTS-STARTPTS,split=3[a][b][c];"
+          "[a]trim=%.2f:%.2f,setpts=PTS-STARTPTS[main];[b]trim=0:%.2f,setpts=PTS-STARTPTS[head];"
+          "[c]trim=%.2f:%.2f,setpts=PTS-STARTPTS[tail];"
+          "[tail][head]xfade=transition=fade:duration=%.2f:offset=0[x];"
+          "[main][x]concat=n=2:v=1:a=0,%s[v]") % (CL, XF, CL - XF, XF, CL - XF, CL, XF, UP)
+    run([FF, "-y", "-v", "error", "-i", s + ".mp4", "-filter_complex", fc, "-map", "[v]"] + ENC + ["units/%s.mp4" % s])
+
+# 2) transition clips: full unit A dissolving into full unit B (2.5 s dissolve)
+pairs = [("v1_wide","v2_window"),("v2_window","v3_counter"),("v3_counter","v4_corner"),("v4_corner","v1_wide"),
+         ("v1_wide","v5_night"),("v5_night","v2_window"),("v2_window","v5_night"),("v5_night","v4_corner"),("v4_corner","v5_night")]
+UL = CL - XF
+for a, b in pairs:
+    fc = "[0:v][1:v]xfade=transition=fade:duration=2.5:offset=%.3f,format=yuv420p[v]" % (UL - 2.5)
+    run([FF, "-y", "-v", "error", "-i", "units/%s.mp4" % a, "-i", "units/%s.mp4" % b, "-filter_complex", fc,
+         "-map", "[v]"] + ENC + ["units/T_%s__%s.mp4" % (a, b)])
+log.write("DONE\n"); log.close()
