@@ -1,0 +1,36 @@
+import subprocess, os, json
+FF=r"C:\Users\1234d\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-9.0.2-full_build\bin\ffmpeg.EXE"
+FP=FF.replace("ffmpeg.EXE","ffprobe.exe")
+D=r"C:\Users\1234d\Documents\AmbientChannel\08_rainy_cafe"; os.chdir(D)
+CF=0x08000000
+def dur(f): return float(subprocess.run([FP,"-v","error","-show_entries","format=duration","-of","csv=p=0",f],capture_output=True,text=True,creationflags=CF).stdout)
+UL=dur("units/v1_wide.mp4")
+# (scene, minutes)
+dusk=[("v1_wide",20),("v2_window",12),("v3_counter",10),("v4_corner",12)]
+plan=[]
+t=0
+while t<360-1:
+    for s,m in dusk:
+        if t>=360-1: break
+        plan.append((s,m)); t+=m
+night=[("v5_night",20),("v2_window",10),("v5_night",20),("v4_corner",10)]
+# go into night from the last dusk scene: make sure the last dusk scene is wide or corner (pairs exist)
+if plan[-1][0] not in ("v1_wide","v4_corner"): plan.append(("v1_wide",8))
+while t<600+5:
+    for s,m in night:
+        plan.append((s,m)); t+=m
+lines=[]; total=0.0
+for i,(s,m) in enumerate(plan):
+    n=max(3,round(m*60/UL))
+    reps=n-(1 if i>0 else 0)-(1 if i<len(plan)-1 else 0)
+    if i>0:
+        p=plan[i-1][0]; T="units/T_%s__%s.mp4"%(p,s)
+        if not os.path.exists(T): raise SystemExit("missing "+T)
+        lines.append("file '%s'"%T)
+    lines+=["file 'units/%s.mp4'"%s]*reps
+    total+=n*UL
+open("list10.txt","w").write("\n".join(lines)+"\n")
+json.dump({"plan":plan,"total":total,"UL":UL,"lines":len(lines)},open("plan10.json","w"))
+r=subprocess.run([FF,"-y","-v","error","-f","concat","-safe","0","-i","list10.txt","-stream_loop","-1","-i","audio1h.m4a",
+   "-map","0:v","-map","1:a","-c","copy","-t","36000","-movflags","+faststart","Rainy_Cafe_10h.mp4"],capture_output=True,text=True,creationflags=CF)
+open("build10_log.txt","w").write("rc=%d %s\nDONE\n"%(r.returncode,r.stderr[-1500:]))
