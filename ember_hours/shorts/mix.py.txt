@@ -1,0 +1,48 @@
+import subprocess, numpy as np, random, os
+FF=r"C:\Users\1234d\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-9.0.2-full_build\bin\ffmpeg.EXE"
+os.chdir(r"C:\Users\1234d\Documents\AmbientChannel\08_rainy_cafe")
+CF=0x08000000
+SR=44100; T=3600; N=T*SR
+def load(f):
+    raw=subprocess.run([FF,"-v","error","-i",f,"-f","f32le","-ac","2","-ar",str(SR),"-"],capture_output=True,creationflags=CF).stdout
+    return np.frombuffer(raw,np.float32).reshape(-1,2).copy()
+def rms_db(x): return float(20*np.log10(np.sqrt((x.astype(np.float64)**2).mean())+1e-9))
+def norm(x,db): return (x*np.float32(10**((db-rms_db(x))/20))).astype(np.float32)
+def seamless(x,xf):
+    n=int(xf*SR); a=x[:-n].copy(); t=np.linspace(0,1,n,dtype=np.float32)[:,None]
+    a[:n]=x[-n:]*(1-t)+x[:n]*t; return a
+def tile(x,off=0):
+    reps=N//len(x)+2; return np.tile(x,(reps,1))[off:off+N]
+random.seed(11)
+rain=seamless(load("rain.mp3"),2.0)
+mix=tile(rain)*np.float32(0.6)
+mix+=tile(rain[::-1].copy(),int(11.3*SR))*np.float32(0.4)
+for i in range(0,N,SR*60):
+    j=min(N,i+SR*60); t=(np.arange(i,j,dtype=np.float64)/SR)
+    mix[i:j]*=(0.85+0.1*np.sin(2*np.pi*t/97)+0.05*np.sin(2*np.pi*t/23+1)).astype(np.float32)[:,None]
+g=np.float32(10**((-27-rms_db(mix[:SR*600]))/20)); mix*=g
+log=open("mix_log.txt","w")
+tracks=[norm(load("music%d.mp3"%i),-24) for i in (1,2,3)]
+pos=int(5*SR); order=[]
+while pos<N:
+    cyc=[0,1,2]; random.shuffle(cyc)
+    if order and cyc[0]==order[-1]: cyc.reverse()
+    for k in cyc:
+        x=tracks[k]; L=min(len(x),N-pos)
+        if L<=0: break
+        f=np.ones(L,np.float32); fi=min(int(2*SR),L); f[:fi]=np.linspace(0,1,fi); fo=min(int(3*SR),L); f[-fo:]=np.minimum(f[-fo:],np.linspace(1,0,fo))
+        mix[pos:pos+L]+=x[:L]*f[:,None]; pos+=L+int(8*SR); order.append(k)
+ev={"cup":("cup.mp3",-31,(70,200)),"espresso":("espresso.mp3",-33,(280,620)),
+    "tram":("tram.mp3",-34,(420,900)),"thunder":("thunder.mp3",-32,(600,1300))}
+cnt={}
+for name,(fn,db,(lo,hi)) in ev.items():
+    x=norm(load(fn),db); p=random.uniform(lo,hi)*0.5; c=0
+    while p*SR+len(x)<N:
+        s=int(p*SR); mix[s:s+len(x)]+=x*np.float32(random.uniform(0.75,1.1)); c+=1; p+=random.uniform(lo,hi)
+    cnt[name]=c
+pk=float(np.abs(mix).max())
+if pk>0.95: mix*=np.float32(0.95/pk)
+log.write("order %s events %s peak %.3f total %.1f\n"%(order,cnt,pk,rms_db(mix[:SR*600]))); log.flush()
+p=subprocess.Popen([FF,"-v","error","-y","-f","f32le","-ar",str(SR),"-ac","2","-i","-","-c:a","aac","-b:a","192k","audio1h.m4a"],stdin=subprocess.PIPE,creationflags=CF)
+for i in range(0,N,SR*60): p.stdin.write(mix[i:i+SR*60].tobytes())
+p.stdin.close(); p.wait(); log.write("DONE\n"); log.close()
