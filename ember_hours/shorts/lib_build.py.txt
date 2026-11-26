@@ -12,6 +12,7 @@ def run(cmd):
 W,H,X=2560,1440,12
 SRC=json.load(open("units_src.json"))   # name -> [file,S,E,glass or null]
 for n,(f,S,E,G) in SRC.items():
+    if os.path.exists("units/%s.mp4"%n) and "--force" not in sys.argv: continue
     N=E-S-X
     loop=("[0:v]fps=24,tmix=frames=3:enable=between(n\\,126\\,129),split=3[a][b][c];"
           "[a]trim=start_frame=%d:end_frame=%d,setpts=PTS-STARTPTS[m];[b]trim=start_frame=%d:end_frame=%d,setpts=PTS-STARTPTS[t];"
@@ -38,6 +39,7 @@ while t<600+5:
         plan.append((s,m)); t+=m
 pairs=sorted(set((plan[i-1][0],plan[i][0]) for i in range(1,len(plan))))
 for a,b in pairs:
+    if os.path.exists("units/T_%s__%s.mp4"%(a,b)) or not (os.path.exists("units/%s.mp4"%a) and os.path.exists("units/%s.mp4"%b)): continue
     fc="[0:v][1:v]xfade=transition=fade:duration=3:offset=%.3f,format=yuv420p[v]"%(dur("units/%s.mp4"%a)-3)
     run([FF,"-y","-v","error","-i","units/%s.mp4"%a,"-i","units/%s.mp4"%b,"-filter_complex",fc,"-map","[v]"]+ENC+["units/T_%s__%s.mp4"%(a,b)])
 lines=[]; chapters=[]; total=0.0
