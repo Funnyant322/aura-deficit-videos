@@ -1,0 +1,57 @@
+import subprocess, os, json, sys
+FF=r"C:\Users\1234d\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-9.0.2-full_build\bin\ffmpeg.EXE"
+FP=FF.replace("ffmpeg.EXE","ffprobe.exe")
+D=r"C:\Users\1234d\Documents\AmbientChannel\09_old_library"; os.chdir(D); CF=0x08000000
+os.makedirs("units",exist_ok=True)
+log=open("build_log.txt","w")
+ENC=["-c:v","libx265","-b:v","7M","-maxrate","9M","-bufsize","14M","-preset","medium","-tag:v","hvc1","-pix_fmt","yuv420p","-r","24",
+     "-x265-params","log-level=error:keyint=48:min-keyint=48:scenecut=0"]
+def run(cmd):
+    r=subprocess.run(cmd,capture_output=True,text=True,creationflags=CF)
+    log.write(cmd[-1]+" rc=%d %s\n"%(r.returncode,r.stderr[-400:])); log.flush(); return r.returncode
+W,H,X=2560,1440,12
+SRC=json.load(open("units_src.json"))   # name -> [file,S,E,glass or null]
+for n,(f,S,E,G) in SRC.items():
+    N=E-S-X
+    loop=("[0:v]fps=24,tmix=frames=3:enable=between(n\\,126\\,129),split=3[a][b][c];"
+          "[a]trim=start_frame=%d:end_frame=%d,setpts=PTS-STARTPTS[m];[b]trim=start_frame=%d:end_frame=%d,setpts=PTS-STARTPTS[t];"
+          "[c]trim=start_frame=%d:end_frame=%d,setpts=PTS-STARTPTS[h];[t][h]xfade=transition=fade:duration=0.5:offset=0[x];"
+          "[m][x]concat=n=2:v=1:a=0,scale=%d:%d:flags=lanczos,unsharp=5:5:0.4")%(S+X,E-X,E-X,E,S,S+X,W,H)
+    if G:
+        fc=loop+(",format=gbrp,split=3[p][q][r];[q]tmix=frames=7[bg];[p][bg]blend=all_expr='clip(A+2.2*max(A-B\\,0)\\,0\\,255)'[en];"
+                 "[1:v]format=gray,scale=%d:%d,format=gbrp[mk];[r][en][mk]maskedmerge,format=yuv420p[v]")%(W,H)
+        cmd=[FF,"-y","-v","error","-i",f,"-loop","1","-i",G,"-filter_complex",fc]
+    else:
+        cmd=[FF,"-y","-v","error","-i",f,"-filter_complex",loop+",format=yuv420p[v]"]
+    run(cmd+["-map","[v]","-frames:v",str(N)]+ENC+["units/%s.mp4"%n])
+def dur(p): return float(subprocess.run([FP,"-v","error","-show_entries","format=duration","-of","csv=p=0",p],capture_output=True,text=True,creationflags=CF).stdout)
+UL=dur("units/v1_wide.mp4")
+dusk=[("v1_wide",20),("v2_fire",15),("v3_desk",12),("v4_window",12)]
+night=[("v5_night",20),("v2_fire",10),("v5_night",20),("v4_window",10)]
+plan=[]; t=0
+while t<360-1:
+    for s,m in dusk:
+        if t>=360-1: break
+        plan.append((s,m)); t+=m
+while t<600+5:
+    for s,m in night:
+        plan.append((s,m)); t+=m
+pairs=sorted(set((plan[i-1][0],plan[i][0]) for i in range(1,len(plan))))
+for a,b in pairs:
+    fc="[0:v][1:v]xfade=transition=fade:duration=3:offset=%.3f,format=yuv420p[v]"%(dur("units/%s.mp4"%a)-3)
+    run([FF,"-y","-v","error","-i","units/%s.mp4"%a,"-i","units/%s.mp4"%b,"-filter_complex",fc,"-map","[v]"]+ENC+["units/T_%s__%s.mp4"%(a,b)])
+lines=[]; chapters=[]; total=0.0
+for i,(s,m) in enumerate(plan):
+    n=max(3,round(m*60/UL)); reps=n-(1 if i>0 else 0)-(1 if i<len(plan)-1 else 0)
+    if i>0: lines.append("file 'units/T_%s__%s.mp4'"%(plan[i-1][0],s))
+    chapters.append((round(total),s))
+    lines+=["file 'units/%s.mp4'"%s]*reps; total+=n*UL
+open("list10.txt","w").write("\n".join(lines)+"\n")
+# audio: 10 one-hour mixes, story order
+open("alist.txt","w").write("".join("file '%s.m4a'\n"%h for h in ["H1","H2","H3","H1","H2","H3","H4","H4","H4","H4"]))
+json.dump({"plan":plan,"total":total,"UL":UL,"chapters":chapters},open("plan10.json","w"))
+log.write("UNITS DONE\n"); log.flush()
+if "--units-only" in sys.argv: sys.exit()
+r=subprocess.run([FF,"-y","-v","error","-f","concat","-safe","0","-i","list10.txt","-f","concat","-safe","0","-i","alist.txt",
+   "-map","0:v","-map","1:a","-c","copy","-t","36000","-movflags","+faststart","Old_Library_10h.mp4"],capture_output=True,text=True,creationflags=CF)
+log.write("10h rc=%d %s\nALL DONE\n"%(r.returncode,r.stderr[-1500:])); log.close()
