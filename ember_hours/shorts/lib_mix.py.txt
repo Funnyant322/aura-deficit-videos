@@ -9,17 +9,16 @@ def load(f):
 def rms_db(x): return 20*np.log10(np.sqrt((x.astype(np.float64)**2).mean())+1e-9)
 def norm(x,db): return (x*10**((db-rms_db(x))/20)).astype(np.float32)
 def granular(src,out,db,rng,glen=(6,12),xf=2.0):
-    # random grains of src with crossfades -> no audible loop
-    src=norm(src,db); L=len(src); n=int(xf*SR); pos=0; first=True
-    while pos<len(out):
-        g=int(rng.uniform(*glen)*SR); s=rng.randint(0,L-g-1); seg=src[s:s+g].copy()
-        if rng.random()<0.5: seg=seg[::-1].copy()
-        if not first:
-            t=np.linspace(0,1,n,dtype=np.float32)[:,None]; m=min(n,len(out)-pos)
-            out[pos:pos+m]=out[pos:pos+m]*(1-t[:m])+seg[:m]*t[:m]; seg=seg[n:]; pos+=m
-            if pos>=len(out): break
-        k=min(len(seg),len(out)-pos); out[pos:pos+k]=seg[:k]; pos+=k; first=False
-        pos-=n if pos<len(out) else 0
+    # random grains of src joined with crossfades -> no audible loop
+    src=norm(src,db); L=len(src); n=int(xf*SR); pos=0; N0=len(out)
+    t=np.linspace(0,1,n,dtype=np.float32)[:,None]
+    while pos<N0:
+        g=int(rng.uniform(*glen)*SR); s=rng.randint(0,L-g-1); seg=src[s:s+g]
+        if rng.random()<0.5: seg=seg[::-1]
+        if pos==0:
+            k=min(g,N0); out[:k]=seg[:k]; pos=k; continue
+        out[pos-n:pos]=out[pos-n:pos]*(1-t)+seg[:n]*t
+        k=min(g-n,N0-pos); out[pos:pos+k]=seg[n:n+k]; pos+=k
     return out
 rain=load("rain.mp3"); fire=load("fire.mp3")
 music=[load("music%d.mp4"%i) for i in (1,2,3,4)]
