@@ -11,16 +11,17 @@ def run(cmd):
     log.write(cmd[-1]+" rc=%d %s\n"%(r.returncode,r.stderr[-400:])); log.flush(); return r.returncode
 W,H,X=2560,1440,12
 SRC=json.load(open("units_src.json"))   # name -> [file,S,E,glass or null]
-for n,(f,S,E,G) in SRC.items():
+for n,v in SRC.items():
+    f,S,E,G=v[:4]; K=v[4] if len(v)>4 else 2.2
     if os.path.exists("units/%s.mp4"%n) and "--force" not in sys.argv: continue
     N=E-S-X
-    loop=("[0:v]fps=24,tmix=frames=3:enable=between(n\\,126\\,129),split=3[a][b][c];"
+    loop=("[0:v]fps=24,split=3[a][b][c];"
           "[a]trim=start_frame=%d:end_frame=%d,setpts=PTS-STARTPTS[m];[b]trim=start_frame=%d:end_frame=%d,setpts=PTS-STARTPTS[t];"
           "[c]trim=start_frame=%d:end_frame=%d,setpts=PTS-STARTPTS[h];[t][h]xfade=transition=fade:duration=0.5:offset=0[x];"
           "[m][x]concat=n=2:v=1:a=0,scale=%d:%d:flags=lanczos,unsharp=5:5:0.4")%(S+X,E-X,E-X,E,S,S+X,W,H)
     if G:
-        fc=loop+(",format=gbrp,split=3[p][q][r];[q]tmix=frames=7[bg];[p][bg]blend=all_expr='clip(A+2.2*max(A-B\\,0)\\,0\\,255)'[en];"
-                 "[1:v]format=gray,scale=%d:%d,format=gbrp[mk];[r][en][mk]maskedmerge,format=yuv420p[v]")%(W,H)
+        fc=loop+(",format=gbrp,split=3[p][q][r];[q]tmix=frames=7[bg];[p][bg]blend=all_expr='clip(A+%.1f*max(A-B\\,0)\\,0\\,255)'[en];"
+                 "[1:v]format=gray,scale=%d:%d,format=gbrp[mk];[r][en][mk]maskedmerge,format=yuv420p[v]")%(K,W,H)
         cmd=[FF,"-y","-v","error","-i",f,"-loop","1","-i",G,"-filter_complex",fc]
     else:
         cmd=[FF,"-y","-v","error","-i",f,"-filter_complex",loop+",format=yuv420p[v]"]
