@@ -6,6 +6,9 @@ log=open("mix_log.txt","w")
 def load(f):
     raw=subprocess.run([FF,"-v","error","-i",f,"-vn","-f","f32le","-ac","2","-ar",str(SR),"-"],capture_output=True,creationflags=CF).stdout
     return np.frombuffer(raw,np.float32).reshape(-1,2).copy()
+def soft(x,k=5.0):
+    r=np.sqrt((x.astype(np.float64)**2).mean())*k
+    return (np.tanh(x/r)*r).astype(np.float32)
 def rms_db(x): return 20*np.log10(np.sqrt((x.astype(np.float64)**2).mean())+1e-9)
 def norm(x,db): return (x*10**((db-rms_db(x))/20)).astype(np.float32)
 def granular(src,out,db,rng,glen=(6,12),xf=2.0):
@@ -20,9 +23,9 @@ def granular(src,out,db,rng,glen=(6,12),xf=2.0):
         out[pos-n:pos]=out[pos-n:pos]*(1-t)+seg[:n]*t
         k=min(g-n,N0-pos); out[pos:pos+k]=seg[n:n+k]; pos+=k
     return out
-rain=load("rain.mp3"); fire=load("fire.mp3")
+rain=soft(load("rain.mp3")); fire=soft(load("fire.mp3"),4.0)
 music=[load("music%d.mp4"%i) for i in (1,2,3,4)]
-ev={k:load(k+".mp3") for k in ("thunder","page","clock","wind")}
+ev={k:soft(load(k+".mp3"),6.0) for k in ("thunder","page","clock","wind")}
 P={ # hour profiles: rain dB, fire dB, music dB, music gap s, event (dB,(lo,hi)) ; None = off
  "H1":dict(rain=-27,fire=-31,mus=-24,gap=(8,25),thunder=(-33,(700,1400)),page=(-36,(300,700)),wind=(-35,(900,1800)),clock=None,seed=1),
  "H2":dict(rain=-25.5,fire=-31,mus=-24.5,gap=(15,40),thunder=(-31,(350,800)),page=(-36,(400,900)),wind=(-33,(400,900)),clock=None,seed=2),
@@ -52,7 +55,7 @@ for name,p in P.items():
             mix[s:s+len(y)]+=y; c+=1; q+=rng.uniform(lo,hi)
         cnt[e]=c
     pk=float(np.abs(mix).max())
-    if pk>0.95: mix*=0.95/pk
+    mix=np.tanh(mix/0.9)*0.9
     log.write("%s order=%s events=%s peak=%.2f total=%.1f\n"%(name,order,cnt,pk,rms_db(mix[::7]))); log.flush()
     pr=subprocess.Popen([FF,"-v","error","-y","-f","f32le","-ar",str(SR),"-ac","2","-i","-","-c:a","aac","-b:a","192k","%s.m4a"%name],stdin=subprocess.PIPE,creationflags=CF)
     pr.stdin.write(mix.tobytes()); pr.stdin.close(); pr.wait(); del mix
